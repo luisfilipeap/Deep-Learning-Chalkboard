@@ -1,4 +1,4 @@
-"""Loaders for the example datasets bundled with BERT-cpu.
+"""Loaders for the example datasets bundled with DL ChalkBoard.
 
 Two datasets live here, for the two things this project trains:
 
@@ -20,7 +20,7 @@ The loader returns data that is **ready to feed the engine**: every feature is
 numeric and the layout follows the project's *column-oriented* convention
 (``X`` is ``(n_features, n_samples)``, the same orientation ``nn.Linear``
 expects), and labels are integers in ``{0, 1}``. Nothing here depends on
-``bert_cpu`` — it produces plain NumPy arrays, so you decide when to wrap them in
+``dlcb`` — it produces plain NumPy arrays, so you decide when to wrap them in
 a ``Tensor``.
 
 Encoding choices (all standard, kept deliberately simple and inspectable):
@@ -351,7 +351,7 @@ def load_flatland() -> FlatlandDataset:
     Reads ``datasets/flatland/corpus.txt``, strips the Project Gutenberg
     header/footer, and returns a :class:`FlatlandDataset` exposing ``.text``,
     ``.paragraphs`` and ``.sentences``. Pure text in, plain Python strings out —
-    nothing here depends on ``bert_cpu``.
+    nothing here depends on ``dlcb``.
 
     Returns
     -------
@@ -365,7 +365,7 @@ def load_flatland() -> FlatlandDataset:
     >>> flat = datasets.load_flatland()
     >>> flat.sentences[0]
     'I call our world Flatland, not because we call it so, ...'
-    >>> from bert_cpu import Tokenizer
+    >>> from dlcb import Tokenizer
     >>> tok = Tokenizer()
     >>> tok.build_vocab(flat.sentences, max_size=2000)   # learn WordPiece from it
     """

@@ -52,7 +52,7 @@ def excerpt(output: str) -> str:
 def main() -> None:
     console = Console(record=True, width=84)
     console.print(Text.from_ansi(excerpt(capture())))
-    console.save_svg(str(OUT), title="bert-cpu — gradient-graph walkthrough")
+    console.save_svg(str(OUT), title="DL ChalkBoard — gradient-graph walkthrough")
     print(f"wrote {OUT.relative_to(ROOT)}")
 
 

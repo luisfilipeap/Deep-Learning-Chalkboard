@@ -115,7 +115,7 @@ def test_flatland_feeds_tokenizer():
     Uses a slice + small vocab so the (deliberately un-optimised, clarity-first)
     WordPiece training loop stays fast in the test suite.
     """
-    from bert_cpu import Tokenizer
+    from dlcb import Tokenizer
 
     flat = datasets.load_flatland()
     tok = Tokenizer()

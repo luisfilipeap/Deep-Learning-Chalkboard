@@ -1,4 +1,4 @@
-"""Example datasets bundled with BERT-cpu.
+"""Example datasets bundled with DL ChalkBoard.
 
 Import this module and call a loader. There are two, one per training task:
 
@@ -16,7 +16,7 @@ Import this module and call a loader. There are two, one per training task:
 
 The arrays are plain NumPy, so wrap them in the engine when you want to train::
 
-    from bert_cpu import engine as cpu
+    from dlcb import engine as cpu
     X = cpu.Tensor(train.X)            # already (features, batch)
 
 **Flatland** (text corpus) — cleaned prose for the tokenizer / masked-LM::
@@ -27,7 +27,7 @@ The arrays are plain NumPy, so wrap them in the engine when you want to train::
     flat.paragraphs    # list[str], blank-line-separated
     flat.sentences     # list[str], naive .!? split
 
-    from bert_cpu import Tokenizer
+    from dlcb import Tokenizer
     tok = Tokenizer()
     tok.build_vocab(flat.sentences, max_size=2000)   # learn WordPiece from it
 """

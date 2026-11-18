@@ -12,9 +12,9 @@ Run them with::
 
 import numpy as np
 
-from bert_cpu import engine as cpu
-from bert_cpu import nn
-from bert_cpu.tokenizer import Tokenizer
+from dlcb import engine as cpu
+from dlcb import nn
+from dlcb.tokenizer import Tokenizer
 
 
 # A small corpus where several words share the stem "play" and the suffix "ing",

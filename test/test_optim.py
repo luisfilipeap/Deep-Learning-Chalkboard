@@ -19,8 +19,8 @@ Run them with::
 
 import numpy as np
 
-from bert_cpu import engine as cpu
-from bert_cpu import optim
+from dlcb import engine as cpu
+from dlcb import optim
 
 
 # ====================================================================== #

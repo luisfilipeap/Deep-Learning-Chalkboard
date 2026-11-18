@@ -24,8 +24,8 @@ from typing import Callable, Sequence, Tuple
 
 import numpy as np
 
-from bert_cpu import engine as cpu
-from bert_cpu import nn
+from dlcb import engine as cpu
+from dlcb import nn
 
 
 def numeric_gradient(f: Callable[[], float], x: np.ndarray, eps: float = 1e-6) -> np.ndarray:

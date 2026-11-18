@@ -25,7 +25,7 @@ from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 
-from bert_cpu.engine import Tensor
+from dlcb.engine import Tensor
 
 
 class Optimizer:

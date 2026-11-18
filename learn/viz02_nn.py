@@ -20,8 +20,8 @@ This file is here to be **read and run**::
 
 import numpy as np
 
-from bert_cpu import engine as cpu
-from bert_cpu import nn
+from dlcb import engine as cpu
+from dlcb import nn
 from learn.console import console
 from learn.viz01_engine import draw_graph, draw_backward_steps
 
