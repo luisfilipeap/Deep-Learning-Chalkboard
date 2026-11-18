@@ -43,11 +43,11 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import datasets
-from bert_cpu import engine as cpu
-from bert_cpu import nn
-from bert_cpu import optim
-from bert_cpu.loss import cross_entropy
-from bert_cpu.tokenizer import Tokenizer
+from dlcb import engine as cpu
+from dlcb import nn
+from dlcb import optim
+from dlcb.loss import cross_entropy
+from dlcb.tokenizer import Tokenizer
 
 
 # ============================================================================ #

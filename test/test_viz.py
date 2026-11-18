@@ -8,7 +8,7 @@ Run them — and see the actual output — with::
     pytest -s test/test_viz.py
 """
 
-from bert_cpu import engine as cpu
+from dlcb import engine as cpu
 from learn.viz01_engine import demo_gradient_graph
 from learn.viz02_nn import demo_linear_chain
 

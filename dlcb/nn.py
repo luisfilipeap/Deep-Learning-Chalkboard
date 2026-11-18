@@ -11,8 +11,8 @@ from typing import Iterator, List, Optional, Tuple
 
 import numpy as np
 
-from bert_cpu import engine
-from bert_cpu.engine import Tensor, cat
+from dlcb import engine
+from dlcb.engine import Tensor, cat
 
 
 class Parameter(Tensor):

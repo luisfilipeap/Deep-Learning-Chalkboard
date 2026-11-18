@@ -41,7 +41,7 @@ from typing import Optional
 
 import numpy as np
 
-from bert_cpu.engine import Tensor
+from dlcb.engine import Tensor
 
 
 def cross_entropy(logits: Tensor, targets, ignore_index: int = -100) -> Tensor:

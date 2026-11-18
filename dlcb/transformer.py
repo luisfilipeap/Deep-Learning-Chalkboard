@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bert_cpu.attention import MultiHeadAttention
-from bert_cpu.engine import Tensor
-from bert_cpu.nn import Dropout, Embedding, LayerNorm, Linear, Module
+from dlcb.attention import MultiHeadAttention
+from dlcb.engine import Tensor
+from dlcb.nn import Dropout, Embedding, LayerNorm, Linear, Module
 
 
 class PositionwiseFeedForward(Module):

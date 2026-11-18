@@ -24,8 +24,8 @@ with ``python -m learn.viz02_nn``).
 
 import numpy as np
 
-from bert_cpu import engine as cpu
-from bert_cpu import nn
+from dlcb import engine as cpu
+from dlcb import nn
 from test.test_engine import numeric_gradient
 
 

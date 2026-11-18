@@ -1,4 +1,4 @@
-"""Didactic visualisations for BERT-cpu.
+"""Didactic visualisations for DL ChalkBoard.
 
 This package holds the *runnable walkthroughs* (the ``viz_*`` modules) that print
 a computational graph and animate reverse-mode autodiff, so the maths of the

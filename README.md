@@ -1,18 +1,29 @@
-# BERT-CPU
+# DL ChalkBoard
 
-> *"What I cannot create, I do not understand."*  
-> — Richard Feynman
+<p align="center">
+  <img src="docs/feynman_blackboard.jpg" alt="Richard Feynman's blackboard at Caltech at the time of his death, February 1988. Top left: What I cannot create, I do not understand. Know how to solve every problem that has been solved." width="720">
+</p>
 
-This project is built in that spirit: the surest way to understand BERT is to
-build it from scratch. Here, *from scratch* is meant literally — **NumPy is the
-only dependency, used only as an array computation backend**.
+> *"What I cannot create, I do not understand.
+> Know how to solve every problem that has been solved."*
+> — Richard Feynman's blackboard at Caltech, at the time of his death (February 1988).
 
-## What is BERT-cpu?
+<sub>**Photo:** *Richard Feynman's blackboard at time of his death*, 1988. Caltech Images
+Collection, identifier 1.10-29. Courtesy of the Archives, California Institute of
+Technology. Reproduced here for educational purposes; all rights remain with the Caltech
+Archives and Special Collections.</sub>
 
-BERT-cpu is a NumPy-only, CPU-only environment for learning how a BERT-style
-model is built and trained *from the autograd level up* — no GPUs, no CUDA, no
-heavyweight framework. It favours **clarity, reproducibility and
-inspectability** over raw performance. **Our engine is deliberately not meant to compete with PyTorch, TensorFlow, JAX or any other Deep Learning framework**.
+This project is built in that spirit, and its name comes from the Feynman's chalkboard: the surest
+way to understand deep learning is to build it from scratch, one derivation at a time. Here, *from scratch* is meant literally — **NumPy is the only dependency,
+used only as an array computation backend**.
+
+## What is DL ChalkBoard?
+
+DL ChalkBoard (`dlcb`) is a NumPy-only, CPU-only environment for learning how deep networks
+— from an MLP to a BERT-style Transformer — are built and trained *from the autograd level
+up*: no GPUs, no CUDA, no heavyweight framework. A chalkboard is the cheapest teaching tool
+there is, and that is the point: **if you have a laptop, you have everything this project
+needs**. It favours **clarity, reproducibility and inspectability** over raw performance. **Our engine is deliberately not meant to compete with PyTorch, TensorFlow, JAX or any other Deep Learning framework**.
 
 Its real strength is that it makes the **learning machinery visible**. For
 example, the didactic walkthrough turns the autograd engine inside out: it draws
@@ -58,7 +69,7 @@ The same drawing scales up unchanged: a single `wᵀ @ x` op, or a whole stack o
 
 - Validate that an idea is **mathematically and computationally sound** in a
   transparent setting before investing in a large-scale implementation.
-- **Reproducibility:** one global seed (`bert_cpu.set_seed(0)`) makes a whole run
+- **Reproducibility:** one global seed (`dlcb.set_seed(0)`) makes a whole run
   repeatable end to end, with far fewer sources of randomness than large-scale
   GPU training.
 - **Minimal stack:** only NumPy — no CUDA versions, GPU kernels, or distributed
@@ -111,7 +122,7 @@ in `test_model.py` mean your install is fine; anything else does not.
 
 ## Learning path (start here)
 
-This project is meant to be *read and run* from the ground up. Everything BERT does
+This project is meant to be *read and run* from the ground up. Everything a deep network does
 eventually reduces to one idea: a graph of tensor operations through which gradients flow
 backward. The three packages take you through that idea three times, each time asking more
 of you — and a practical course walks them in this order:
@@ -128,7 +139,7 @@ installed it on.
 ### Step 1 — watch the gradient engine
 
 The didactic visualisations live in the `learn/` package and are run as modules from the
-project root (use `-m` so `bert_cpu` is importable — running the file by path is not).
+project root (use `-m` so `dlcb` is importable — running the file by path is not).
 With the virtual environment activated:
 
 ```bash
@@ -227,14 +238,14 @@ The full testing reference is in
 ## Usage
 
 With the virtual environment activated, import the library from the project
-root. The package directory is `bert_cpu` (underscore — the importable name),
-while the distribution is named `bert-cpu`.
+root. The package directory is `dlcb` (the importable name),
+while the distribution is named `dl-chalkboard`.
 
 **The autograd engine.** Build an expression out of `Tensor`s and differentiate
 it with `backward()`:
 
 ```python
-from bert_cpu import engine as cpu
+from dlcb import engine as cpu
 
 cpu.set_seed(0)                        # reproducible run
 
@@ -251,7 +262,7 @@ place. It uses the column-vector "bias trick" (input augmented with `x_0 = 1`,
 bias folded into row 0 of the weight), so a layer is just `Wᵀ @ x`:
 
 ```python
-from bert_cpu import engine as cpu, nn
+from dlcb import engine as cpu, nn
 
 cpu.set_seed(0)
 
@@ -299,7 +310,7 @@ jupyter lab                  # or: jupyter notebook
 
 Then open `exercises/q01_activations.ipynb`. Opening the `.ipynb` files directly in VS Code
 (or any other notebook editor) works just as well — the first cell of every notebook puts
-the project root on `sys.path`, so `import bert_cpu` resolves whether the kernel starts in
+the project root on `sys.path`, so `import dlcb` resolves whether the kernel starts in
 the project root or inside `exercises/`.
 
 ### The six exercises, in order
@@ -370,7 +381,7 @@ research/01_research_questions.ipynb
 ```
 
 They share one axis, the one the engine can measure about itself: **accuracy per FLOP**.
-`bert_cpu/engine.py` counts the arithmetic it executes (`reset_flops()` / `flop_count()`),
+`dlcb/engine.py` counts the arithmetic it executes (`reset_flops()` / `flop_count()`),
 so every question is a trade-off — *does this idea buy accuracy for its compute?* — rather
 than the unanswerable *does this idea help?*. The themes span cheaper layers (low-rank,
 ternary weights, sparsity, conditional compute), activations and gating (extending q02–q04),
@@ -438,7 +449,7 @@ raise `NotImplementedError`, and those tests are waiting for them. Anything fail
 ### Run the didactic walkthroughs
 
 The walkthroughs live in `learn/` and are run as modules from the project root
-(use `-m` so `bert_cpu` is importable, not by path):
+(use `-m` so `dlcb` is importable, not by path):
 
 ```bash
 python -m learn.viz01_engine                               # autograd engine, node by node

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bert_cpu.engine import Tensor
-from bert_cpu.nn import Dropout, Linear, Module
+from dlcb.engine import Tensor
+from dlcb.nn import Dropout, Linear, Module
 
 
 def scaled_dot_product_attention(

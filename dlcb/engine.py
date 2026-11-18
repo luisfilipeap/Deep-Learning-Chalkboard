@@ -47,7 +47,7 @@ Axis = Optional[Union[int, Tuple[int, ...]]]
 # The precision can be changed globally by modifying ``engine.default_dtype``:
 #
 #     import numpy as np
-#     import bert_cpu.engine as engine
+#     import dlcb.engine as engine
 #
 #     engine.default_dtype = np.float32
 #
@@ -154,9 +154,9 @@ def set_seed(seed: int) -> None:
     -------------
     Call it **once, at the very start**, before creating any tensors or data;
 
-        import bert_cpu
-        bert_cpu.set_seed(0)        # same seed -> identical run every time
-        x = bert_cpu.randn(3, 4)    # reproducible
+        import dlcb
+        dlcb.set_seed(0)        # same seed -> identical run every time
+        x = dlcb.randn(3, 4)    # reproducible
 
     Call ``set_seed`` again with another value for a different but equally
     repeatable run; omit it entirely for a fresh random run.

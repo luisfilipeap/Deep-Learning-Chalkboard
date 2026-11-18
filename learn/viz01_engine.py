@@ -16,7 +16,7 @@ This file is here to be **read and run**. Run it on its own with::
 
 import numpy as np
 
-from bert_cpu import engine as cpu
+from dlcb import engine as cpu
 from learn.console import console
 
 

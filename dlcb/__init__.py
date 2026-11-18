@@ -1,9 +1,9 @@
-"""BERT-cpu: a tiny NumPy-backed BERT-style Transformer encoder.
+"""DL ChalkBoard (dlcb): deep learning from scratch — NumPy only, on any CPU.
 
 """
 
-from bert_cpu.engine import Tensor, cat, ones, randn, set_seed, zeros
-from bert_cpu.nn import (
+from dlcb.engine import Tensor, cat, ones, randn, set_seed, zeros
+from dlcb.nn import (
     Dropout,
     Embedding,
     LayerNorm,
@@ -12,8 +12,8 @@ from bert_cpu.nn import (
     Parameter,
     Sequential,
 )
-from bert_cpu.attention import MultiHeadAttention, scaled_dot_product_attention
-from bert_cpu.transformer import (
+from dlcb.attention import MultiHeadAttention, scaled_dot_product_attention
+from dlcb.transformer import (
     BERTEmbeddings,
     BERTForMaskedLM,
     BERTModel,
@@ -21,9 +21,9 @@ from bert_cpu.transformer import (
     PositionwiseFeedForward,
     TransformerEncoder,
 )
-from bert_cpu.optim import Adam, Optimizer, SGD
-from bert_cpu.loss import cross_entropy, masked_lm_loss
-from bert_cpu.tokenizer import Tokenizer
+from dlcb.optim import Adam, Optimizer, SGD
+from dlcb.loss import cross_entropy, masked_lm_loss
+from dlcb.tokenizer import Tokenizer
 
 __all__ = [
     "Tensor",

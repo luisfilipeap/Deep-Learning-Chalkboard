@@ -16,7 +16,7 @@ The didactic *visualisation* of the gradient graph now lives separately, in
 
 import numpy as np
 
-from bert_cpu import engine as cpu
+from dlcb import engine as cpu
 
 
 # ====================================================================== #

@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from bert_cpu.transformer import BERTModel, EncoderLayer
-from bert_cpu.attention import MultiHeadAttention
+from dlcb.transformer import BERTModel, EncoderLayer
+from dlcb.attention import MultiHeadAttention
 
 
 def test_encoder_layer_shape():
