@@ -112,13 +112,10 @@ pip install -r requirements.txt
 ### Check the install
 
 ```bash
-pytest test/test_engine.py test/test_nn.py     # the parts you will actually use
+pytest
 ```
 
-Everything there should pass. A full `pytest` also runs `test/test_model.py`, which
-**fails on purpose**: attention and the Transformer encoder are the parts of the library
-that are still scaffolding, so their four tests raise `NotImplementedError`. Four failures
-in `test_model.py` mean your install is fine; anything else does not.
+Every test should pass (about ten seconds).
 
 ## Learning path (start here)
 
@@ -274,12 +271,30 @@ y.sum().backward()                     # gradients flow into layer.weight
 print(layer.weight.grad)               # dL/dW (bias row included)
 ```
 
-> Optimizers (`optim.SGD`, `optim.Adam`), the loss (`loss.cross_entropy`) and the
-> WordPiece `tokenizer` are implemented — Exercises 05 and 06 train with them. What is
-> still scaffolding: `MultiHeadAttention`, the Transformer encoder and `BERTModel`, plus
-> `nn.LayerNorm`, `nn.Dropout` and `nn.Sequential`. Their tests fail on purpose, and
-> filling some of those stubs in is exactly what a couple of the research questions ask
-> of you.
+**A miniBERT.** Attention, the encoder and the masked-language-model head are built
+from the same engine ops — no new backward rule anywhere. Activations are token-major,
+`(batch, seq, d_model)`:
+
+```python
+import numpy as np
+from dlcb import set_seed
+from dlcb.transformer import BERTModel, BERTForMaskedLM, mask_tokens
+from dlcb.loss import masked_lm_loss
+
+set_seed(0)
+bert = BERTModel(vocab_size=100, d_model=64, num_layers=2, num_heads=4, d_ff=256, max_len=32)
+mlm = BERTForMaskedLM(bert, vocab_size=100)       # decoder tied to the token embeddings
+
+ids = np.random.randint(5, 100, size=(8, 16))      # ids 0-4 are [PAD] [UNK] [CLS] [SEP] [MASK]
+inputs, labels = mask_tokens(ids, mask_id=4, vocab_size=100)   # 15 %, then 80/10/10
+loss = masked_lm_loss(mlm(inputs), labels)         # cross entropy on the masked tokens only
+loss.backward()
+```
+
+`test/test_attention.py` and `test/test_model.py` check it five independent ways: against a
+plain-NumPy reference written token by token, against properties the maths guarantees,
+against finite differences for every parameter, against the masking recipe, and by
+training it on a task that can only be solved by attending to the right tokens.
 
 ## Exercises (Jupyter notebooks)
 
@@ -433,16 +448,12 @@ pip install pytest
 ### Run the software tests
 
 ```bash
-pytest test/test_engine.py test/test_nn.py   # the parts that are built — all pass
-pytest                                       # everything, including the scaffolding
+pytest                                       # everything — all pass
 pytest -v                                    # verbose, one line per test
 pytest test/test_viz.py                      # smoke-check the learn/ walkthroughs
 ```
 
-A bare `pytest` reports **four failures in `test/test_model.py`**, and that is the correct
-result today: `MultiHeadAttention`, the encoder layer and `BERTModel` are still stubs that
-raise `NotImplementedError`, and those tests are waiting for them. Anything failing outside
-`test_model.py` is a real problem.
+Every test passes; any failure is a real problem.
 
 ### Run the didactic walkthroughs
 

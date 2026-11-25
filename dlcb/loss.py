@@ -106,5 +106,13 @@ def cross_entropy(logits: Tensor, targets, ignore_index: int = -100) -> Tensor:
 
 
 def masked_lm_loss(logits: Tensor, labels, ignore_index: int = -100) -> Tensor:
-    """Cross-entropy restricted to masked positions for MLM pretraining."""
-    raise NotImplementedError
+    """Cross-entropy restricted to masked positions for MLM pretraining.
+
+    ``logits`` has shape ``(batch, seq, vocab)``; ``labels`` has shape
+    ``(batch, seq)`` and holds the original token id at the positions chosen by
+    :func:`dlcb.transformer.mask_tokens` and ``ignore_index`` everywhere else.
+    It is exactly :func:`cross_entropy` with those positions ignored: the model
+    is graded only on the tokens it had to reconstruct, and the average runs over
+    those tokens alone.
+    """
+    return cross_entropy(logits, labels, ignore_index=ignore_index)

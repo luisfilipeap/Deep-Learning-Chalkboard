@@ -365,3 +365,66 @@ def test_normal_init_stats_and_reproducibility():
     cpu.set_seed(0)
     w2 = nn.normal_(shape, mean=0.0, std=0.02)
     assert np.allclose(w1.data, w2.data)
+
+
+# ====================================================================== #
+# LayerNorm, Sequential, tokenwise
+# ====================================================================== #
+def test_layernorm_standardises_each_vector():
+    cpu.set_seed(20)
+    ln = nn.LayerNorm(6)
+    y = ln(cpu.Tensor(3.0 + 5.0 * np.random.randn(4, 5, 6))).data
+    assert np.allclose(y.mean(axis=-1), 0.0, atol=1e-12)
+    assert np.allclose(y.var(axis=-1), 1.0, atol=1e-4)
+
+
+def test_layernorm_matches_formula_with_affine():
+    cpu.set_seed(21)
+    ln = nn.LayerNorm(5)
+    ln.gamma.data[:] = np.random.randn(5)
+    ln.beta.data[:] = np.random.randn(5)
+    x = np.random.randn(3, 5)
+    mu, var = x.mean(-1, keepdims=True), x.var(-1, keepdims=True)
+    expected = (x - mu) / np.sqrt(var + ln.eps) * ln.gamma.data + ln.beta.data
+    assert np.allclose(ln(cpu.Tensor(x)).data, expected)
+
+
+def test_layernorm_gradcheck():
+    cpu.set_seed(22)
+    ln = nn.LayerNorm(4)
+    ln.gamma.data[:] = np.random.randn(4)
+    x = cpu.Tensor(np.random.randn(2, 3, 4))
+    target = np.random.randn(2, 3, 4)
+
+    def forward():
+        return ((ln(x) - target) ** 2).mean()
+
+    for t in (x, ln.gamma, ln.beta):
+        t.zero_grad()
+    forward().backward()
+    for name, t in (("x", x), ("gamma", ln.gamma), ("beta", ln.beta)):
+        numeric = numeric_gradient(lambda: float(forward().data), t.data)
+        assert np.allclose(t.grad, numeric, atol=1e-6), f"gradient mismatch for {name}"
+
+
+def test_sequential_chains_in_order_and_collects_parameters():
+    cpu.set_seed(23)
+    a, b = nn.Linear(3, 4), nn.Linear(4, 2)
+    seq = nn.Sequential(a, b)
+    x = cpu.Tensor(np.random.randn(3, 5))
+    assert np.allclose(seq(x).data, b(a(x)).data)
+    assert [n for n, _ in seq.named_parameters()] == ["layers.0.weight", "layers.1.weight"]
+    seq.eval()
+    assert not a.training and not b.training
+
+
+def test_tokenwise_applies_the_layer_to_every_token():
+    cpu.set_seed(24)
+    layer = nn.Linear(4, 3)
+    x = np.random.randn(2, 5, 4)
+    y = nn.tokenwise(layer, cpu.Tensor(x)).data
+    assert y.shape == (2, 5, 3)
+    for b in range(2):
+        for i in range(5):
+            col = cpu.Tensor(x[b, i].reshape(4, 1))
+            assert np.allclose(y[b, i], layer(col).data[:, 0])

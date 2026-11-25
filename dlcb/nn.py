@@ -268,34 +268,202 @@ class Embedding(Module):
         return self.weight[idx]            # (*idx.shape, embedding_dim)
 
 
+def tokenwise(layer: "Linear", x: Tensor) -> Tensor:
+    """Apply a column-oriented ``Linear`` to every vector of a token-major tensor.
+
+    The problem: two layouts
+    ------------------------
+    This library has two conventions that meet in the Transformer:
+
+    * ``Linear`` is **column-oriented** (the convention of the engine's demo,
+      ``y = Wᵀ @ x``): it takes ``(in_features, n)`` and returns
+      ``(out_features, n)`` — one sample per *column*.
+    * Transformer activations are **token-major** (the convention of
+      ``Embedding`` and of the BERT literature): ``(batch, seq, d)`` — one token
+      vector per position, its ``d`` features along the *last* axis.
+
+    ``Linear`` cannot take a 3-D tensor directly. But for a per-token layer the
+    ``batch`` and ``seq`` axes carry no meaning: a batch of sentences is just
+    ``batch * seq`` token vectors that are all transformed by the same ``W``. So
+    we lay every token out as one column, apply the layer once, and fold the
+    result back into its place.
+
+    Step by step, on a small example
+    --------------------------------
+    Take ``batch = 2`` sentences of ``seq = 3`` tokens, ``d = 2`` features, and a
+    ``Linear(2, 4)``. Write ``t_bs`` for the vector of token ``s`` in sentence
+    ``b``::
+
+        x : (2, 3, 2)              sentence 0: [ t00  t01  t02 ]
+                                   sentence 1: [ t10  t11  t12 ]
+
+    1. **Flatten** the leading axes, ``x.reshape(6, 2)`` — one token per row::
+
+           [ t00 ]   row 0
+           [ t01 ]   row 1
+           [ t02 ]   row 2        token (b, s) lands on row  b * seq + s
+           [ t10 ]   row 3
+           [ t11 ]   row 4
+           [ t12 ]   row 5
+
+       NumPy stores arrays in row-major order with the last axis contiguous, so
+       this reshape only re-reads the same numbers: each token's ``d`` features
+       stay together and the tokens keep their order.
+
+    2. **Transpose**, ``.T`` — one token per column, the layout ``Linear``
+       expects::
+
+           (2, 6) = [ t00  t01  t02  t10  t11  t12 ]
+
+    3. **Apply the layer**, ``Wᵀ @ [1; x]`` — ``(4, 3) @ (3, 6) -> (4, 6)``.
+       Column ``j`` of a matrix product depends only on column ``j`` of the
+       right-hand factor, so every output column is computed from its own token
+       alone. This is what makes the layer *position-wise*: tokens are never
+       mixed here (mixing them is attention's job)::
+
+           (4, 6) = [ y00  y01  y02  y10  y11  y12 ]      y_bs = Wᵀ [1; t_bs]
+
+    4. **Undo the transpose**, ``.T`` -> ``(6, 4)``, and **undo the flatten**,
+       ``.reshape(2, 3, 4)`` — every output vector goes back to the sentence and
+       position its input came from::
+
+           y : (2, 3, 4)           sentence 0: [ y00  y01  y02 ]
+                                   sentence 1: [ y10  y11  y12 ]
+
+    The result is the same as calling the layer once per token in a Python loop
+    (``test/test_nn.py::test_tokenwise_applies_the_layer_to_every_token`` checks
+    exactly that), but as one matrix product instead of ``batch * seq`` small
+    ones.
+
+    Cost and gradient
+    -----------------
+    ``reshape`` and ``transpose`` only move data, so the FLOP counter charges
+    them nothing; the cost is the one matmul inside ``Linear``,
+    ``2 * d_out * (d + 1) * batch * seq``. They also need no new backward rule:
+    on the way back the engine undoes them (the inverse reshape, the inverse
+    permutation), routing each token's gradient to its own position. And since
+    the six columns share one ``W``, the matmul's backward *sums* the six
+    per-token contributions into ``W.grad`` — exactly as it sums over the
+    samples of an ordinary batch.
+
+    Parameters
+    ----------
+    layer : Linear
+        Any column-oriented layer mapping ``(d, n)`` to ``(d_out, n)``.
+    x : Tensor
+        Shape ``(..., d)``: any number of leading axes (``(batch, seq, d)`` in
+        the Transformer, ``(batch, heads, seq, d)`` would work too).
+
+    Returns
+    -------
+    Tensor
+        Shape ``(..., d_out)``: the same leading axes, the layer's output width.
+    """
+    lead = x.shape[:-1]                       # e.g. (batch, seq)
+    n = int(np.prod(lead))                    # number of token vectors: batch * seq
+    cols = x.reshape(n, x.shape[-1]).T        # (d, n): steps 1-2, one token per column
+    y = layer(cols)                           # (d_out, n): step 3, Wᵀ @ [1; x]
+    return y.T.reshape(*lead, y.shape[0])     # (..., d_out): step 4, back in place
+
+
 class LayerNorm(Module):
-    """Layer normalisation over the last dimension with learnable affine."""
+    """Layer normalisation over the last dimension (Ba, Kiros & Hinton, 2016).
+
+    Each token vector is standardised on its own — mean 0, variance 1 across its
+    ``d`` features — and then given back a learnable scale and shift::
+
+        mu    = mean(x)                      # over the last axis
+        var   = mean((x - mu)²)
+        y     = (x - mu) / sqrt(var + eps) * gamma + beta
+
+    Unlike batch normalisation, nothing is shared across the batch or the
+    sequence, so the layer behaves the same in training and evaluation and for
+    any sequence length — which is why the Transformer uses it.
+
+    ``gamma`` starts at 1 and ``beta`` at 0, so the layer starts as a pure
+    standardisation. Built from ``mean``, ``var``, ``sqrt`` and arithmetic: no
+    new backward rule.
+
+    Reference: J. L. Ba, J. R. Kiros and G. E. Hinton, "Layer Normalization,"
+    arXiv:1607.06450, 2016.
+
+    Parameters
+    ----------
+    normalized_shape : int
+        Size ``d`` of the last axis.
+    eps : float
+        Added to the variance so a constant vector does not divide by zero.
+    """
 
     def __init__(self, normalized_shape: int, eps: float = 1e-5) -> None:
-        raise NotImplementedError
+        self.eps = eps
+        self.gamma: Parameter = Parameter(np.ones(normalized_shape, dtype=engine.default_dtype))
+        self.beta: Parameter = Parameter(np.zeros(normalized_shape, dtype=engine.default_dtype))
 
     def forward(self, x: Tensor) -> Tensor:
-        raise NotImplementedError
+        mu = x.mean(axis=-1, keepdims=True)
+        var = x.var(axis=-1, keepdims=True)
+        return (x - mu) / (var + self.eps).sqrt() * self.gamma + self.beta
 
 
 class Dropout(Module):
-    """Inverted dropout; a no-op when in eval mode."""
+    """Inverted dropout (Srivastava et al., 2014); a no-op in eval mode.
+
+    During training each element is zeroed with probability ``p``, and the
+    survivors are scaled by ``1 / (1 - p)``::
+
+        mask_i ~ Bernoulli(1 - p)
+        y      = x * mask / (1 - p)
+
+    The scaling keeps the *expected* value unchanged, ``E[y] = x``, so at
+    evaluation time the layer can simply return ``x`` — that is what makes it
+    "inverted" (the classic formulation instead rescales at test time).
+
+    Like ``Linear`` and ``Embedding``, Dropout adds **no backward rule of its
+    own**: the mask is a constant tensor, so the engine's ``*`` routes the
+    gradient through the kept elements (scaled by the same ``1 / (1 - p)``)
+    and sends exactly zero to the dropped ones.
+
+    The mask is drawn from NumPy's global RNG, so ``set_seed`` makes it
+    reproducible.
+
+    Reference: N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever and
+    R. Salakhutdinov, "Dropout: A Simple Way to Prevent Neural Networks from
+    Overfitting," JMLR 15(56):1929–1958, 2014.
+
+    Parameters
+    ----------
+    p : float
+        Probability of zeroing an element, in ``[0, 1)``.
+    """
 
     def __init__(self, p: float = 0.1) -> None:
-        raise NotImplementedError
+        if not 0.0 <= p < 1.0:
+            raise ValueError(f"dropout probability must be in [0, 1), got {p}")
+        self.p = p
 
     def forward(self, x: Tensor) -> Tensor:
-        raise NotImplementedError
+        if not self.training or self.p == 0.0:
+            return x
+        keep = (np.random.rand(*x.shape) >= self.p).astype(x.data.dtype)
+        scale = Tensor(keep / (1.0 - self.p), requires_grad=False)
+        return x * scale
 
 
 class Sequential(Module):
-    """Container that chains modules end to end."""
+    """Container that chains modules end to end: ``y = m_n( … m_2(m_1(x)) )``.
+
+    The modules are kept in a list attribute, which ``Module`` already walks, so
+    their parameters and train/eval state are found without extra code.
+    """
 
     def __init__(self, *modules: Module) -> None:
-        raise NotImplementedError
+        self.layers: List[Module] = list(modules)
 
     def forward(self, x: Tensor) -> Tensor:
-        raise NotImplementedError
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 # ---------------------------------------------------------------------- #

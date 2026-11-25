@@ -12,7 +12,7 @@ from dlcb.nn import (
     Parameter,
     Sequential,
 )
-from dlcb.attention import MultiHeadAttention, scaled_dot_product_attention
+from dlcb.attention import MultiHeadAttention, padding_mask, scaled_dot_product_attention
 from dlcb.transformer import (
     BERTEmbeddings,
     BERTForMaskedLM,
@@ -20,6 +20,7 @@ from dlcb.transformer import (
     EncoderLayer,
     PositionwiseFeedForward,
     TransformerEncoder,
+    mask_tokens,
 )
 from dlcb.optim import Adam, Optimizer, SGD
 from dlcb.loss import cross_entropy, masked_lm_loss
@@ -40,6 +41,7 @@ __all__ = [
     "Dropout",
     "Sequential",
     "scaled_dot_product_attention",
+    "padding_mask",
     "MultiHeadAttention",
     "PositionwiseFeedForward",
     "EncoderLayer",
@@ -47,6 +49,7 @@ __all__ = [
     "BERTEmbeddings",
     "BERTModel",
     "BERTForMaskedLM",
+    "mask_tokens",
     "Optimizer",
     "SGD",
     "Adam",
