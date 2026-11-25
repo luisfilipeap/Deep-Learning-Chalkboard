@@ -391,6 +391,7 @@ def run_sgns(
     seed: int = 0,
     tie_tables: bool = False,
     opt_factory: Callable = lambda params, lr: optim.Adam(params, lr=lr),
+    extra_loss: Optional[Callable[[SkipGramNS], cpu.Tensor]] = None,
     name: str = "sgns",
     verbose: bool = False,
 ) -> Result:
@@ -400,6 +401,11 @@ def run_sgns(
     training; ``extra["silhouette_before"]`` is the same measure on the random
     initialisation, which is the honest zero point. Every hyper-parameter here is
     also a FLOP knob — ``dim``, ``neg_k`` and ``epochs`` all multiply the cost.
+
+    ``extra_loss(model) -> scalar Tensor`` is added to every batch's loss — the
+    place for a regulariser on the tables (orthogonality, isotropy, dimension
+    regularisation). Its FLOPs are counted. ``neg_k=0`` drops the negative term
+    entirely, leaving only the positive pairs (plus whatever ``extra_loss`` adds).
     """
     cpu.set_seed(seed)
     word2id, id2word, freqs, centers, contexts = flatland_pairs(min_count, window)
@@ -426,6 +432,8 @@ def run_sgns(
             neg = sample_negatives((len(idx), neg_k))
             opt.zero_grad()
             loss = ns_loss(model, centers[idx], contexts[idx], neg, dim)
+            if extra_loss is not None:
+                loss = loss + extra_loss(model)
             loss.backward()
             opt.step()
             running += float(loss.data)

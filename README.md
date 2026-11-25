@@ -131,7 +131,7 @@ of you — and a practical course walks them in this order:
 |---|---|---|
 | **`learn/`** | **Watch.** Terminal walkthroughs that draw the computational graph and animate the backward pass, node by node | one sitting |
 | **`exercises/`** | **Write.** Six notebooks: a new op and its derivative, layers built from engine ops, then two models actually trained on real data | q01–q04 an afternoon each; q05–q06 one session |
-| **`research/`** | **Investigate.** Pick one of fifteen open questions and measure whether an idea from the literature buys accuracy for its FLOPs | 2–5 days |
+| **`research/`** | **Investigate.** Pick one of eight open questions and measure whether an idea from the literature buys accuracy for its FLOPs | 2–5 days |
 
 Nothing here needs a GPU, an account, or a download: the whole path runs on the laptop you
 installed it on.
@@ -227,7 +227,7 @@ whole pipeline at once, with the maths beside the code:
 
 ### Step 5 — investigate
 
-Finally, `research/01_research_questions.ipynb` turns the engine into an instrument. Fifteen
+Finally, `research/01_research_questions.ipynb` turns the engine into an instrument. Eight
 open questions, each with the papers to read first; you pick **one** and spend two to five
 days answering it experimentally, measuring **accuracy per FLOP** against the q05/q06
 baselines. See [Research project](#research-project-pick-one-question).
@@ -372,7 +372,7 @@ to bottom.
 ## Research project (pick one question)
 
 Once the exercises are done, `research/` turns the engine into an instrument. It holds
-**fifteen open research questions** — the student picks **one** and spends two to five days
+**eight open research questions** — the student picks **one** and spends two to five days
 answering it experimentally, against the code this repository already contains.
 
 ```bash
@@ -383,13 +383,11 @@ research/01_research_questions.ipynb
 They share one axis, the one the engine can measure about itself: **accuracy per FLOP**.
 `dlcb/engine.py` counts the arithmetic it executes (`reset_flops()` / `flop_count()`),
 so every question is a trade-off — *does this idea buy accuracy for its compute?* — rather
-than the unanswerable *does this idea help?*. The themes span cheaper layers (low-rank,
-ternary weights, sparsity, conditional compute), activations and gating (extending q02–q04),
-losses and regularisation (focal and poly losses, R-Drop, mixup), optimisation (Lion, Muon,
-equal-budget comparisons), and representation learning (distillation, data pruning,
-contrastive pretraining, embedding-table shape). Each question comes with two to four
-papers to read first, what to implement, the protocol to follow, and what two versus five
-days of work looks like.
+than the unanswerable *does this idea help?*. Three questions are on Adult (ternary
+weights, distillation, data pruning) and five on the q06 word embeddings, all built on
+papers from 2024 on (orthogonality regularisation, isotropy vs. clusters, training without
+negatives, Zipfian whitening, linear representations). Each question is one sentence, the
+papers to read, and what to measure.
 
 The notebook also carries the **experimental protocol** the answers share (three seeds
 minimum, mean ± standard deviation, never a claim inside the error bars, FLOPs reported
@@ -409,7 +407,7 @@ print(summarize(rows, baseline="baseline"))   # mean ± std, FLOPs, and the delt
 ```
 
 It runs the q05 loop (or the q06 one, via `run_sgns`) and returns the score *with* its
-training and inference FLOPs, so fifteen students answering fifteen different questions
+training and inference FLOPs, so students answering different questions
 produce tables that can be read side by side. It is checked against the notebooks it
 mirrors: `run_adult(baseline_mlp, seed=0)` reproduces q05's 0.8543 test accuracy and its
 84,227,782,200 training FLOPs exactly.
