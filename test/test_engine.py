@@ -15,6 +15,7 @@ The didactic *visualisation* of the gradient graph now lives separately, in
 """
 
 import numpy as np
+import pytest
 
 from dlcb import engine as cpu
 
@@ -234,3 +235,72 @@ def test_gradcheck_mlp():
     for name, t in (("x", x), ("W", W), ("b", b)):
         numeric = numeric_gradient(lambda: float(forward().data), t.data)
         assert np.allclose(t.grad, numeric, atol=1e-5), f"gradient mismatch for {name}"
+
+
+def test_backward_frees_the_graph_unless_retained():
+    """After backward() the graph's cycles are broken, so memory is released.
+
+    Without this, every training step's graph (closure -> node -> closure)
+    waits for the cyclic garbage collector, and a CNN's im2col buffers pile up
+    by gigabytes. ``retain_graph=True`` keeps it differentiable.
+    """
+    import gc
+    import weakref
+
+    x = cpu.Tensor(np.random.randn(3, 4))
+    h = (x * 2.0).tanh()
+    probe = weakref.ref(h)
+    loss = h.sum()
+    gc.disable()
+    try:
+        loss.backward()
+        del h, loss
+        assert probe() is None          # freed by reference counting alone
+    finally:
+        gc.enable()
+
+    # A freed graph: a second backward() changes nothing.
+    x2 = cpu.Tensor(np.array([1.0, 2.0]))
+    loss2 = (x2 * x2).sum()
+    loss2.backward()
+    first = x2.grad.copy()
+    assert np.allclose(first, 2 * x2.data)
+    loss2.backward()
+    assert np.array_equal(x2.grad, first)
+
+    # A retained graph is still differentiable: the second call moves .grad.
+    x3 = cpu.Tensor(np.array([1.0, 2.0]))
+    loss3 = (x3 * x3).sum()
+    loss3.backward(retain_graph=True)
+    first = x3.grad.copy()
+    loss3.backward()
+    assert not np.allclose(x3.grad, first)
+
+
+def test_no_grad_builds_no_graph_but_counts_flops():
+    import gc
+    import weakref
+
+    w = cpu.Tensor(np.random.randn(3, 3))
+    x = cpu.Tensor(np.random.randn(3, 2))
+    cpu.reset_flops()
+    with cpu.no_grad():
+        assert not cpu.is_grad_enabled()
+        y = (w @ x).tanh()
+        assert y._prev == set() and not y.requires_grad
+        probe = weakref.ref(y)
+        gc.disable()
+        try:
+            del y
+            assert probe() is None                  # no cycle: freed at once
+        finally:
+            gc.enable()
+    assert cpu.flop_count() == 2 * 3 * 3 * 2 + 3 * 2  # matmul + tanh, still counted
+    assert cpu.is_grad_enabled()
+
+    # The mode is restored even if the block raises, and gradients work again.
+    with pytest.raises(RuntimeError):
+        with cpu.no_grad():
+            raise RuntimeError
+    (w @ x).sum().backward()
+    assert np.abs(w.grad).sum() > 0

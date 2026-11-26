@@ -12,3 +12,7 @@ dist/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Downloaded datasets (fetched and MD5-checked by datasets/loaders.py)
+datasets/mnist/*.gz
+datasets/dibco2018/*.zip

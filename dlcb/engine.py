@@ -271,6 +271,51 @@ def _expand_reduced(grad: np.ndarray, axis: Axis, keepdims: bool, target_shape: 
     return np.broadcast_to(grad, target_shape)
 
 
+def _no_backward() -> None:
+    """The ``_backward`` of a leaf, and of every node once its graph is freed."""
+
+
+# Whether ops record the graph. Switched off by ``no_grad`` for forward passes
+# that will never be differentiated (evaluation, prediction).
+_grad_enabled: bool = True
+
+
+class no_grad:
+    """Context manager: run ops without building a graph, as ``torch.no_grad``.
+
+    Inside ``with no_grad():`` every op result is a plain constant: it records
+    no children and keeps no ``_backward`` closure, so it can never be
+    differentiated — and it is freed the moment it is no longer referenced.
+
+    Why it matters: a recorded node sits in a reference cycle
+    (``out -> out._backward -> out``, see ``Tensor.backward``). ``backward()``
+    breaks those cycles, but a forward pass that is never followed by a
+    backward — measuring accuracy, predicting — would leave every one of them
+    for the cyclic garbage collector, and a CNN's activations pile up by
+    gigabytes. Use it for every evaluation::
+
+        with no_grad():
+            logits = model(cpu.Tensor(images))
+
+    FLOPs are still counted: the arithmetic is the same.
+    """
+
+    def __enter__(self) -> "no_grad":
+        global _grad_enabled
+        self._previous = _grad_enabled
+        _grad_enabled = False
+        return self
+
+    def __exit__(self, *exc) -> None:
+        global _grad_enabled
+        _grad_enabled = self._previous
+
+
+def is_grad_enabled() -> bool:
+    """``False`` inside a ``no_grad`` block."""
+    return _grad_enabled
+
+
 class Tensor:
     """An n-dimensional array node in the autograd computational graph.
 
@@ -476,9 +521,23 @@ class Tensor:
         # matmul cost needs (its inner dimension comes from the first operand).
         _add_flops(_forward_flops(_op, self.data, tuple(_children)))
 
+        # Under ``no_grad`` an op result is a constant: no edges, no gradient.
+        if self._prev and not _grad_enabled:
+            self._prev = set()
+            self.requires_grad = False
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
+    def _set_backward(self, fn: Callable[[], None]) -> None:
+        """Attach an op's backward closure — unless the node records no graph.
+
+        Under ``no_grad`` the node has no children, and storing the closure
+        would only create the ``out -> _backward -> out`` cycle for nothing.
+        """
+        if self._prev:
+            self._backward = fn
+
     @staticmethod
     def _as_tensor(x: ArrayLike) -> "Tensor":
         """Wrap a raw value as a non-grad constant tensor (or pass through)."""
@@ -535,7 +594,7 @@ class Tensor:
             if other.requires_grad:
                 other.grad += self._unbroadcast(out.grad, other.shape)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def __mul__(self, other: ArrayLike) -> "Tensor":
@@ -558,7 +617,7 @@ class Tensor:
             if other.requires_grad:
                 other.grad += self._unbroadcast(self.data * out.grad, other.shape)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def __pow__(self, other: Union[int, float]) -> "Tensor":
@@ -579,7 +638,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += (other * self.data ** (other - 1)) * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def __matmul__(self, other: "Tensor") -> "Tensor":
@@ -606,7 +665,7 @@ class Tensor:
                 _add_flops(2 * other.data.size * self.data.shape[-2])
                 other.grad += self._unbroadcast(grad, other.shape)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     # ------------------------------------------------------------------ #
@@ -625,7 +684,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += out.data * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def log(self) -> "Tensor":
@@ -641,7 +700,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += (1.0 / self.data) * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def sqrt(self) -> "Tensor":
@@ -657,7 +716,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += (0.5 / out.data) * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def tanh(self) -> "Tensor":
@@ -673,7 +732,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += (1.0 - out.data ** 2) * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def relu(self) -> "Tensor":
@@ -689,7 +748,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += (self.data > 0.0) * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def gelu(self) -> "Tensor":
@@ -711,7 +770,7 @@ class Tensor:
                 dgelu = 0.5 * (1.0 + t) + 0.5 * x * (1.0 - t ** 2) * dinner
                 self.grad += dgelu * out.grad
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     # ------------------------------------------------------------------ #
@@ -732,7 +791,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += out.grad.reshape(self.data.shape)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def transpose(self, *axes: int) -> "Tensor":
@@ -753,7 +812,7 @@ class Tensor:
                 inv = tuple(np.argsort(axes))
                 self.grad += out.grad.transpose(inv)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     # ------------------------------------------------------------------ #
@@ -776,7 +835,7 @@ class Tensor:
             if self.requires_grad:
                 self.grad += _expand_reduced(out.grad, axis, keepdims, self.shape)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def mean(self, axis: Axis = None, keepdims: bool = False) -> "Tensor":
@@ -795,7 +854,7 @@ class Tensor:
                 g = _expand_reduced(out.grad, axis, keepdims, self.shape)
                 self.grad += g / n
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def var(self, axis: Axis = None, keepdims: bool = False) -> "Tensor":
@@ -814,7 +873,7 @@ class Tensor:
                 g = _expand_reduced(out.grad, axis, keepdims, self.shape)
                 self.grad += (2.0 / n) * (self.data - mu) * g
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def max(self, axis: Axis = None, keepdims: bool = False) -> "Tensor":
@@ -835,7 +894,7 @@ class Tensor:
                 g = _expand_reduced(out.grad, axis, keepdims, self.shape)
                 self.grad += mask * g
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     # ------------------------------------------------------------------ #
@@ -858,17 +917,36 @@ class Tensor:
                 dot = (out.grad * sm).sum(axis=axis, keepdims=True)
                 self.grad += sm * (out.grad - dot)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     # ------------------------------------------------------------------ #
     # Autograd
     # ------------------------------------------------------------------ #
-    def backward(self) -> None:
+    def backward(self, retain_graph: bool = False) -> None:
         """Run reverse-mode autodiff from this (scalar) tensor.
 
         Builds the topological order of the graph, seeds ``self.grad`` with
         ones, then invokes each node's ``_backward`` in reverse order.
+
+        Freeing the graph
+        -----------------
+        Every op's ``_backward`` closure refers to the node it belongs to
+        (``out._backward`` uses ``out.grad``), so each node sits in a reference
+        cycle, ``out -> out._backward -> out``. Python's reference counting
+        cannot free a cycle; only the cyclic garbage collector can, and it runs
+        when *objects* pile up, not when *bytes* do. A graph holds few objects
+        but huge arrays — a CNN step keeps hundreds of MB of im2col columns
+        alive — so without help, memory climbs by gigabytes over a training run.
+
+        So, like PyTorch, once the gradients are computed each node's
+        ``_backward`` is replaced by a no-op. That breaks every cycle, and the
+        whole graph is freed as soon as the last variable pointing at it (say,
+        ``loss``) is reassigned. ``_prev`` and ``_op`` are kept, so the graph
+        can still be drawn; it just cannot be differentiated a second time.
+        Pass ``retain_graph=True`` to keep it differentiable — only needed to
+        run ``backward`` twice on one graph. (The second call accumulates into
+        every ``.grad``, intermediate nodes included, so zero them first.)
         """
         topo: list = []
         visited: set = set()
@@ -885,6 +963,15 @@ class Tensor:
         self.grad = np.ones_like(self.data)
         for v in reversed(topo):
             v._backward()
+
+        if not retain_graph:
+            for v in topo:
+                v._backward = _no_backward       # break out -> _backward -> out
+        # ``build`` is a recursive closure, so it refers to itself and keeps
+        # ``topo`` and ``visited`` — every node — inside a cycle of its own.
+        # Emptying them releases the nodes now instead of at the next GC pass.
+        topo.clear()
+        visited.clear()
 
     def zero_grad(self) -> None:
         """Reset this tensor's gradient to zeros."""
@@ -947,7 +1034,7 @@ class Tensor:
                 # ``add.at`` accumulates correctly when ``idx`` repeats rows.
                 np.add.at(self.grad, idx, out.grad)
 
-        out._backward = _backward
+        out._set_backward(_backward)
         return out
 
     def __repr__(self) -> str:
@@ -1029,5 +1116,5 @@ def cat(tensors: Iterable["Tensor"], axis: int = 0) -> Tensor:
             if t.requires_grad:
                 t.grad += g
 
-    out._backward = _backward
+    out._set_backward(_backward)
     return out

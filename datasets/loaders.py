@@ -1,6 +1,6 @@
 """Loaders for the example datasets bundled with DL ChalkBoard.
 
-Two datasets live here, for the two things this project trains:
+Four datasets live here, for the kinds of data this project trains on:
 
 - **UCI Adult / Census-Income** (``load_adult``) — a *tabular* classification set
   (predict whether a person earns ``>50K`` a year from 14 demographic features).
@@ -11,6 +11,13 @@ Two datasets live here, for the two things this project trains:
   Gutenberg eBook #97), in ``datasets/flatland/corpus.txt``. This is the corpus
   for the tokenizer and masked-language-model side of the project: raw prose to
   learn a vocabulary from and to mask-and-predict over.
+- **MNIST** (``load_mnist``) — 70 000 *images* of handwritten digits, 28 × 28
+  greyscale, for the convolutional networks. The four original IDX files live in
+  ``datasets/mnist/`` (downloaded once, MD5-checked, if missing).
+- **H-DIBCO 2018** (``load_dibco2018``) — 10 scanned *handwritten pages* with a
+  pixel-level ink/background mask each, for *segmentation*. The two zip files
+  of the competition live in ``datasets/dibco2018/`` (downloaded once,
+  MD5-checked, if missing); the BMP images are decoded with NumPy alone.
 
 Everything below the Adult section (encoding, standardisation, one-hot) is
 specific to that tabular set; the Flatland loader at the bottom is much simpler —
@@ -40,7 +47,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -374,3 +381,344 @@ def load_flatland() -> FlatlandDataset:
     paragraphs = _split_paragraphs(text)
     sentences = _split_sentences(paragraphs)
     return FlatlandDataset(text=text, paragraphs=paragraphs, sentences=sentences)
+
+
+# ====================================================================== #
+# MNIST — handwritten digits for the convolutional networks
+# ====================================================================== #
+
+# The four original IDX files sit in datasets/mnist/, gzipped, exactly as
+# published. If one is missing, it is downloaded once (standard library only)
+# and checked against its MD5 before use.
+_MNIST_DIR = Path(__file__).resolve().parent / "mnist"
+_MNIST_MIRROR = "https://ossci-datasets.s3.amazonaws.com/mnist/"
+_MNIST_FILES = {
+    # split: (images file, labels file)
+    "train": ("train-images-idx3-ubyte.gz", "train-labels-idx1-ubyte.gz"),
+    "test": ("t10k-images-idx3-ubyte.gz", "t10k-labels-idx1-ubyte.gz"),
+}
+_MNIST_MD5 = {
+    "train-images-idx3-ubyte.gz": "f68b3c2dcbeaaa9fbdd348bbdeb94873",
+    "train-labels-idx1-ubyte.gz": "d53e105ee54ea40749a09fcbcd1e9432",
+    "t10k-images-idx3-ubyte.gz": "9fb629c4189551a2d022fa330f9573f3",
+    "t10k-labels-idx1-ubyte.gz": "ec29112dd5afa0611ce80d1b7f02629c",
+}
+# IDX magic numbers: 0x00000803 = unsigned bytes, 3 dimensions (images);
+# 0x00000801 = unsigned bytes, 1 dimension (labels).
+_IDX_IMAGES, _IDX_LABELS = 2051, 2049
+
+
+class MNISTDataset:
+    """A split of MNIST: 28 × 28 greyscale digits and their labels 0–9.
+
+    Attributes
+    ----------
+    images : np.ndarray
+        Shape ``(n_samples, 28, 28, 1)``, float64 in ``[0, 1]`` (pixel / 255).
+        **Channels-last**, the ``(batch, H, W, C)`` layout of ``dlcb.conv`` and
+        the ``H × W × C`` of Lecture V — feed it to ``Conv2d`` as is.
+        Background is 0, ink is close to 1.
+    labels : np.ndarray
+        Shape ``(n_samples,)``, int64 in ``{0, …, 9}``.
+    split : str
+        ``"train"`` (60 000 digits) or ``"test"`` (10 000).
+
+    ``X`` gives the same pixels as a *column-oriented* matrix
+    ``(784, n_samples)`` — one flattened image per column, row-major — for a
+    dense ``nn.Linear`` / ``MLP`` baseline, matching ``AdultDataset.X``.
+    """
+
+    def __init__(self, images: np.ndarray, labels: np.ndarray, split: str) -> None:
+        self.images = images
+        self.labels = labels
+        self.split = split
+
+    @property
+    def X(self) -> np.ndarray:
+        """Pixels as ``(784, n_samples)``: one flattened image per column."""
+        return self.images.reshape(len(self), -1).T
+
+    @property
+    def y(self) -> np.ndarray:
+        """Alias of ``labels``, the name ``AdultDataset`` uses."""
+        return self.labels
+
+    @property
+    def n_samples(self) -> int:
+        return self.images.shape[0]
+
+    def __len__(self) -> int:
+        return self.n_samples
+
+    def __repr__(self) -> str:
+        return f"MNISTDataset(split={self.split!r}, n_samples={self.n_samples}, shape=(28, 28, 1))"
+
+
+def _mnist_file(name: str) -> Path:
+    """Path to an MNIST file, downloading (and MD5-checking) it if missing."""
+    import hashlib
+
+    path = _MNIST_DIR / name
+    if not path.exists():
+        import urllib.request
+
+        _MNIST_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".part")
+        try:
+            urllib.request.urlretrieve(_MNIST_MIRROR + name, tmp)
+        except OSError as err:
+            raise RuntimeError(
+                f"{path} is missing and could not be downloaded ({err}). Download "
+                f"{_MNIST_MIRROR + name} by hand into {_MNIST_DIR}/."
+            ) from err
+        tmp.replace(path)
+    digest = hashlib.md5(path.read_bytes()).hexdigest()
+    if digest != _MNIST_MD5[name]:
+        raise RuntimeError(f"{path} is corrupt (MD5 {digest}); delete it to re-download")
+    return path
+
+
+def _read_idx(path: Path, magic: int) -> np.ndarray:
+    """Parse a gzipped IDX file: a big-endian header, then raw unsigned bytes.
+
+    The format (LeCun et al.) is a 4-byte magic number, one 4-byte size per
+    dimension, then the data in row-major order. Ten lines of standard library
+    and ``np.frombuffer`` — no image library needed.
+    """
+    import gzip
+
+    raw = gzip.decompress(path.read_bytes())
+    found = int.from_bytes(raw[0:4], "big")
+    if found != magic:
+        raise ValueError(f"{path.name}: magic number {found}, expected {magic}")
+    ndim = raw[3]
+    shape = tuple(int.from_bytes(raw[4 + 4 * i: 8 + 4 * i], "big") for i in range(ndim))
+    return np.frombuffer(raw, dtype=np.uint8, offset=4 + 4 * ndim).reshape(shape)
+
+
+def load_mnist(split: str = "train", limit: Optional[int] = None) -> MNISTDataset:
+    """Load a split of MNIST as NumPy arrays ready for ``dlcb.conv``.
+
+    Parameters
+    ----------
+    split : {"train", "test"}
+        60 000 training or 10 000 test digits. The test digits were written by
+        different people from the training ones, so it measures generalisation
+        to new handwriting, not to new copies of familiar writers.
+    limit : int, optional
+        Keep only the first ``limit`` digits. A pure-NumPy CNN processes a few
+        hundred images per second, so a few thousand training digits is the
+        practical size for an exercise. The original order is kept (it is not
+        sorted by label), so the first ``limit`` digits contain every class.
+
+    Returns
+    -------
+    MNISTDataset
+        ``.images`` ``(n, 28, 28, 1)`` floats in ``[0, 1]``, ``.labels`` ``(n,)``
+        ints, and ``.X`` ``(784, n)`` for dense baselines.
+
+    Examples
+    --------
+    >>> import datasets
+    >>> train = datasets.load_mnist("train", limit=5000)
+    >>> train
+    MNISTDataset(split='train', n_samples=5000, shape=(28, 28, 1))
+    >>> train.images.shape, train.labels[:5]
+    ((5000, 28, 28, 1), array([5, 0, 4, 1, 9]))
+    """
+    if split not in _MNIST_FILES:
+        raise ValueError(f"split must be one of {sorted(_MNIST_FILES)}, got {split!r}")
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be a positive integer, got {limit}")
+    image_file, label_file = _MNIST_FILES[split]
+    images = _read_idx(_mnist_file(image_file), _IDX_IMAGES)
+    labels = _read_idx(_mnist_file(label_file), _IDX_LABELS)
+    if limit is not None:
+        images, labels = images[:limit], labels[:limit]
+    images = (images.astype(np.float64) / 255.0)[..., None]      # (n, 28, 28, 1)
+    return MNISTDataset(images=images, labels=labels.astype(np.int64), split=split)
+
+
+# ====================================================================== #
+# H-DIBCO 2018 — handwritten document binarisation (pixel segmentation)
+# ====================================================================== #
+
+# The two archives of the competition's benchmark page sit in
+# datasets/dibco2018/, exactly as published. If one is missing it is
+# downloaded once (standard library only) and checked against its MD5. The
+# images are read straight out of the zip files; nothing is extracted.
+_DIBCO_DIR = Path(__file__).resolve().parent / "dibco2018"
+_DIBCO_URL = "https://vc.ee.duth.gr/h-dibco2018/benchmark/"
+_DIBCO_MD5 = {
+    "dibco2018_Dataset.zip": "c335d66ca0b4c226e6c81d41613410fe",   # 10 colour scans
+    "dibco2018-GT.zip": "1fc2cffbbc0d61be864cb23519fb4b03",        # their ground truth
+}
+_DIBCO_N = 10
+
+
+class DIBCODataset:
+    """H-DIBCO 2018: ten handwritten pages and, for each, which pixels are ink.
+
+    **Task.** *Binarisation*: label every pixel of a scanned page as **ink**
+    (text) or **background** (paper, stains, bleed-through from the other side
+    of the sheet, shadows). It is semantic segmentation with two classes: the
+    input is an image and the output is an image of the same height and width.
+
+    Attributes
+    ----------
+    images : list of np.ndarray
+        One per page, ``(H, W, 3)`` float64 RGB in ``[0, 1]``, channels-last
+        like ``dlcb.conv``. **The pages have different sizes** (from 286 × 1212
+        to 922 × 3933 pixels), so this is a list, not one array.
+    masks : list of np.ndarray
+        One per page, ``(H, W)`` int64, the **target**: ``1`` = ink, ``0`` =
+        background. (The competition's files draw ink black, 0, on white, 255;
+        the loader flips them so that 1 marks the class of interest, the usual
+        convention for a segmentation target.)
+    names : list of str
+        ``"1"`` … ``"10"``, the competition's file names.
+
+    Ink is rare — between 3 % and 16 % of the pixels of a page — so a model that
+    answers "background" everywhere already gets about 92 % of the pixels right.
+    Pixel accuracy is therefore a poor score here; the competition ranks by
+    F-measure on the ink class (with PSNR and others alongside).
+
+    ``patches`` cuts the pages into equal squares, which *can* be stacked into a
+    batch for a network.
+    """
+
+    def __init__(self, images: List[np.ndarray], masks: List[np.ndarray], names: List[str]) -> None:
+        self.images = images
+        self.masks = masks
+        self.names = names
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    def __getitem__(self, i: int) -> Tuple[np.ndarray, np.ndarray]:
+        """``(image (H, W, 3), mask (H, W))`` of page ``i``."""
+        return self.images[i], self.masks[i]
+
+    def grey(self, i: int) -> np.ndarray:
+        """Page ``i`` in grey levels, ``(H, W, 1)`` in ``[0, 1]`` (ITU-R BT.601 luma)."""
+        return (self.images[i] @ np.array([0.299, 0.587, 0.114]))[..., None]
+
+    def patches(
+        self, size: int, stride: Optional[int] = None, pages: Optional[List[int]] = None,
+        grey: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Cut pages into ``size × size`` squares, ``stride`` pixels apart.
+
+        Returns ``X`` ``(n, size, size, C)`` (``C`` = 3, or 1 with ``grey=True``)
+        and ``Y`` ``(n, size, size, 1)`` with the mask of each square. Squares
+        that would cross the right or bottom edge are skipped. ``stride``
+        defaults to ``size`` (no overlap). ``pages`` selects which pages to cut
+        (indices into the dataset) — keep the pages you evaluate on out of the
+        ones you train on.
+        """
+        stride = stride or size
+        xs, ys = [], []
+        for i in (range(len(self)) if pages is None else pages):
+            image = self.grey(i) if grey else self.images[i]
+            mask = self.masks[i]
+            h, w = mask.shape
+            for top in range(0, h - size + 1, stride):
+                for left in range(0, w - size + 1, stride):
+                    xs.append(image[top:top + size, left:left + size])
+                    ys.append(mask[top:top + size, left:left + size, None])
+        if not xs:
+            raise ValueError(f"no {size}×{size} patch fits in the selected pages")
+        return np.stack(xs), np.stack(ys)
+
+    def __repr__(self) -> str:
+        return f"DIBCODataset(n_pages={len(self)}, sizes from {min(m.size for m in self.masks):,} to {max(m.size for m in self.masks):,} pixels)"
+
+
+def _dibco_file(name: str) -> Path:
+    """Path to a DIBCO archive, downloading (and MD5-checking) it if missing."""
+    import hashlib
+
+    path = _DIBCO_DIR / name
+    if not path.exists():
+        import urllib.request
+
+        _DIBCO_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".part")
+        try:
+            urllib.request.urlretrieve(_DIBCO_URL + name, tmp)
+        except OSError as err:
+            raise RuntimeError(
+                f"{path} is missing and could not be downloaded ({err}). Download "
+                f"{_DIBCO_URL + name} by hand into {_DIBCO_DIR}/."
+            ) from err
+        tmp.replace(path)
+    digest = hashlib.md5(path.read_bytes()).hexdigest()
+    if digest != _DIBCO_MD5[name]:
+        raise RuntimeError(f"{path} is corrupt (MD5 {digest}); delete it to re-download")
+    return path
+
+
+def _read_bmp(raw: bytes) -> np.ndarray:
+    """Decode an uncompressed 24-bit Windows BMP into ``(H, W, 3)`` uint8 RGB.
+
+    The format is a 14-byte file header (``"BM"``, size, offset of the pixels)
+    and a 40-byte info header (width, height, bits per pixel, compression),
+    then the pixels: **bottom row first** when the height is positive, each
+    pixel stored **B, G, R**, and each row padded to a multiple of 4 bytes.
+    Undoing those three quirks is all it takes — no image library needed.
+    """
+    import struct
+
+    if raw[:2] != b"BM":
+        raise ValueError("not a BMP file")
+    offset = struct.unpack("<I", raw[10:14])[0]
+    width, height = struct.unpack("<ii", raw[18:26])
+    bits, compression = struct.unpack("<HI", raw[28:34])
+    if bits != 24 or compression != 0:
+        raise ValueError(f"only uncompressed 24-bit BMP is supported, got {bits}-bit, compression {compression}")
+    rows = abs(height)
+    row_bytes = (3 * width + 3) // 4 * 4                       # padded to 4 bytes
+    pixels = np.frombuffer(raw, dtype=np.uint8, offset=offset, count=row_bytes * rows)
+    pixels = pixels.reshape(rows, row_bytes)[:, :3 * width].reshape(rows, width, 3)
+    pixels = pixels[:, :, ::-1]                                # BGR -> RGB
+    return pixels[::-1] if height > 0 else pixels              # bottom-up -> top-down
+
+
+def load_dibco2018() -> DIBCODataset:
+    """Load the H-DIBCO 2018 benchmark: 10 handwritten pages and their ink masks.
+
+    These ten pages are the competition's *test* set; it has no training split.
+    For an exercise, cut them with ``DIBCODataset.patches`` and keep some pages
+    out for evaluation.
+
+    Returns
+    -------
+    DIBCODataset
+        ``.images[i]`` ``(H, W, 3)`` floats in ``[0, 1]`` — the input;
+        ``.masks[i]`` ``(H, W)`` ints, 1 = ink, 0 = background — the target.
+
+    Examples
+    --------
+    >>> import datasets
+    >>> dibco = datasets.load_dibco2018()
+    >>> image, mask = dibco[0]
+    >>> image.shape, mask.shape, mask.mean().round(3)
+    ((811, 1504, 3), (811, 1504), 0.051)
+    >>> X, Y = dibco.patches(64, pages=[0, 1, 2])
+    >>> X.shape[1:], Y.shape[1:]
+    ((64, 64, 3), (64, 64, 1))
+    """
+    import zipfile
+
+    images, masks, names = [], [], []
+    with zipfile.ZipFile(_dibco_file("dibco2018_Dataset.zip")) as scans, \
+            zipfile.ZipFile(_dibco_file("dibco2018-GT.zip")) as truth:
+        for k in range(1, _DIBCO_N + 1):
+            image = _read_bmp(scans.read(f"dataset/{k}.bmp"))
+            gt = _read_bmp(truth.read(f"gt/{k}_gt.bmp"))
+            if gt.shape != image.shape:
+                raise ValueError(f"page {k}: image {image.shape} and ground truth {gt.shape} differ")
+            images.append(image.astype(np.float64) / 255.0)
+            masks.append((gt[:, :, 0] == 0).astype(np.int64))  # black (0) = ink -> 1
+            names.append(str(k))
+    return DIBCODataset(images, masks, names)
