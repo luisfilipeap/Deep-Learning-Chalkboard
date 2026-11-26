@@ -2,7 +2,7 @@
 
 """
 
-from dlcb.engine import Tensor, cat, ones, randn, set_seed, zeros
+from dlcb.engine import Tensor, cat, no_grad, ones, randn, set_seed, zeros
 from dlcb.nn import (
     Dropout,
     Embedding,
@@ -12,6 +12,7 @@ from dlcb.nn import (
     Parameter,
     Sequential,
 )
+from dlcb.conv import AvgPool2d, Conv2d, ConvTranspose2d, Flatten, MaxPool2d
 from dlcb.attention import MultiHeadAttention, scaled_dot_product_attention
 from dlcb.transformer import (
     BERTEmbeddings,
@@ -32,6 +33,7 @@ __all__ = [
     "ones",
     "randn",
     "cat",
+    "no_grad",
     "Module",
     "Parameter",
     "Linear",
@@ -39,6 +41,11 @@ __all__ = [
     "LayerNorm",
     "Dropout",
     "Sequential",
+    "Conv2d",
+    "ConvTranspose2d",
+    "MaxPool2d",
+    "AvgPool2d",
+    "Flatten",
     "scaled_dot_product_attention",
     "MultiHeadAttention",
     "PositionwiseFeedForward",

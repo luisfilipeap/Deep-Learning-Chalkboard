@@ -1,1 +1,2 @@
 numpy
+matplotlib   # visualisation only: the exercise notebooks plot with it; dlcb itself imports NumPy alone

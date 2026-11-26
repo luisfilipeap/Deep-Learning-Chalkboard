@@ -14,8 +14,9 @@ Technology. Reproduced here for educational purposes; all rights remain with the
 Archives and Special Collections.</sub>
 
 This project is built in that spirit, and its name comes from the Feynman's chalkboard: the surest
-way to understand deep learning is to build it from scratch, one derivation at a time. Here, *from scratch* is meant literally — **NumPy is the only dependency,
-used only as an array computation backend**.
+way to understand deep learning is to build it from scratch, one derivation at a time. Here, *from scratch* is meant literally — **NumPy is the only dependency
+of the library, used only as an array computation backend** (the notebooks add `matplotlib`, to
+draw pictures).
 
 ## What is DL ChalkBoard?
 
@@ -200,7 +201,7 @@ in Exercise 01, a blank `_backward`) and a grading cell that checks your gradien
 finite differences:
 
 ```bash
-pip install jupyterlab matplotlib     # not runtime dependencies; only the exercises need them
+pip install jupyterlab                # not a runtime dependency; only the exercises need it
 jupyter lab                           # then open exercises/q01_activations.ipynb
 ```
 
@@ -290,15 +291,17 @@ with finite differences.
 
 ### Install the notebook dependencies
 
-Jupyter is *not* a dependency of the library (`requirements.txt` stays NumPy-only) — it is
-only how the exercises are delivered. With the virtual environment activated:
+Jupyter is *not* a dependency of the library — it is only how the exercises are
+delivered. With the virtual environment activated:
 
 ```bash
-pip install jupyterlab matplotlib
+pip install jupyterlab
 ```
 
-`matplotlib` is optional: it is used by a single plotting cell in Exercise 01, which says
-so and skips itself if the package is missing.
+`matplotlib` comes with `requirements.txt`, for visualisation only: the notebooks plot
+images and curves with it (Exercise 09 draws digits, filters and feature maps). The library
+itself never imports it — `dlcb` computes with NumPy alone, and `setup.py` installs only
+NumPy.
 
 ### Launch
 

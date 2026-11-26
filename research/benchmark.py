@@ -1,6 +1,6 @@
 """The measurement instrument for the research questions.
 
-Every question in ``01_research_questions.ipynb`` is a trade-off — *does this idea
+Every question in ``01_research_questions.ipynb`` and ``02_research_questions.ipynb`` is a trade-off — *does this idea
 buy accuracy per FLOP?* — so every experiment has to report two numbers, not one.
 This module makes that cheap and, more importantly, **comparable**: two students
 answering two different questions should produce tables that can be read side by
@@ -19,6 +19,8 @@ What it gives you:
   accuracy, **training FLOPs**, **inference FLOPs** and wall time.
 - :func:`run_sgns` — the q06 loop (word2vec on *Flatland*), scored by the
   silhouette of the representative word groups before and after training.
+- :func:`run_mnist` — the q09 loop (a small CNN on MNIST digits, mini-batch
+  Adam), for the questions about convolutional layers.
 - :func:`repeat` / :func:`summarize` / :func:`pareto` — three seeds, mean ± std,
   and the accuracy-versus-FLOPs picture that answers most of the questions.
 
@@ -46,6 +48,7 @@ import datasets
 from dlcb import engine as cpu
 from dlcb import nn
 from dlcb import optim
+from dlcb.conv import Conv2d, Flatten, MaxPool2d
 from dlcb.loss import cross_entropy
 from dlcb.tokenizer import Tokenizer
 
@@ -456,6 +459,131 @@ def run_sgns(
             "model": model,
             "word2id": word2id,
             "id2word": id2word,
+        },
+    )
+
+
+# ============================================================================ #
+# MNIST digit classification (the q09 task)
+# ============================================================================ #
+_MNIST_CACHE: Dict[str, object] = {}
+
+
+def load_mnist_cached() -> Tuple[object, object]:
+    """The first 10 000 training digits and the 10 000 test digits, loaded once."""
+    if "train" not in _MNIST_CACHE:
+        _MNIST_CACHE["train"] = datasets.load_mnist("train", limit=10_000)
+        _MNIST_CACHE["test"] = datasets.load_mnist("test")
+    return _MNIST_CACHE["train"], _MNIST_CACHE["test"]
+
+
+class DigitCNN(nn.Module):
+    """The q09 model: two (conv -> ReLU -> 2×2 max-pool) stages and a linear head.
+
+    ``kernel`` is the one knob: both convolutions use it, with ``padding`` chosen
+    so that the spatial sizes are those of the q09 model whatever the kernel
+    (28 -> 24 -> 12 -> 8 -> 4). With ``kernel=5`` this *is* the q09 network,
+    5 994 parameters.
+    """
+
+    def __init__(self, kernel: int = 5, channels: Tuple[int, int] = (8, 16)) -> None:
+        c1, c2 = channels
+        pad = (kernel - 5) // 2                       # keeps 28 -> 24 and 12 -> 8
+        if kernel < 5 or kernel % 2 == 0:
+            raise ValueError("kernel must be odd and at least 5")
+        self.conv1 = Conv2d(1, c1, kernel, padding=pad)
+        self.conv2 = Conv2d(c1, c2, kernel, padding=pad)
+        self.pool = MaxPool2d(2)
+        self.flatten = Flatten()
+        self.head = nn.Linear(4 * 4 * c2, 10)
+
+    def forward(self, x: cpu.Tensor) -> cpu.Tensor:
+        h = self.pool(self.conv1(x).relu())
+        h = self.pool(self.conv2(h).relu())
+        return self.head(self.flatten(h)).T           # (batch, 10) logits
+
+
+def baseline_cnn() -> DigitCNN:
+    """The q09 reference model: 5×5 kernels, 8 and 16 channels."""
+    return DigitCNN(kernel=5)
+
+
+def predict_digits(model: nn.Module, images: np.ndarray, chunk: int = 500) -> np.ndarray:
+    """Predicted class of every image, in chunks, without building a graph."""
+    with cpu.no_grad():
+        return np.concatenate([model(cpu.Tensor(images[i:i + chunk])).data.argmax(axis=1)
+                               for i in range(0, len(images), chunk)])
+
+
+def run_mnist(
+    model_factory: Callable[[], nn.Module] = baseline_cnn,
+    *,
+    epochs: int = 4,
+    batch: int = 64,
+    lr: float = 3e-3,
+    seed: int = 0,
+    n_train: int = 10_000,
+    opt_factory: Callable = lambda params, lr: optim.Adam(params, lr=lr),
+    name: str = "mnist",
+    verbose: bool = False,
+) -> Result:
+    """Train a CNN on MNIST digits and report test accuracy *and* its FLOPs.
+
+    The q09 recipe: the first ``n_train`` training digits, mini-batches of 64,
+    Adam at 3e-3, 4 epochs, softmax cross-entropy. ``model_factory()`` must
+    return a module mapping ``(batch, 28, 28, 1)`` images to ``(batch, 10)``
+    logits.
+
+    Returns
+    -------
+    Result
+        ``score`` is accuracy on the 10 000 test digits. ``train_flops`` counts
+        the training steps only (no validation passes); ``infer_flops`` is one
+        forward pass over the test set. The q09 notebook draws other random
+        numbers before building its model, so ``seed=0`` here does not repeat its
+        exact run; the baseline numbers to compare against are this function's.
+    """
+    cpu.set_seed(seed)
+    train_ds, test_ds = load_mnist_cached()
+    x_train, y_train = train_ds.images[:n_train], train_ds.labels[:n_train]
+
+    model = model_factory()
+    opt = opt_factory(model.parameters(), lr)
+    total_flops = 0
+    started = time.time()
+    for epoch in range(1, epochs + 1):
+        cpu.reset_flops()
+        order = np.random.permutation(len(x_train))
+        losses = []
+        for start in range(0, len(order), batch):
+            rows = order[start:start + batch]
+            opt.zero_grad()
+            loss = cross_entropy(model(cpu.Tensor(x_train[rows])), y_train[rows])
+            loss.backward()
+            opt.step()
+            losses.append(float(loss.data))
+        total_flops += cpu.flop_count()
+        if verbose:
+            print(f"   epoch {epoch}/{epochs}   loss {np.mean(losses):.4f}")
+    seconds = time.time() - started
+
+    with count_flops() as c:
+        pred = predict_digits(model, test_ds.images)
+    test_acc = float((pred == test_ds.labels).mean())
+
+    return Result(
+        name=name,
+        seed=seed,
+        score=test_acc,
+        train_flops=total_flops,
+        infer_flops=c.value,
+        seconds=seconds,
+        extra={
+            "acc_test": test_acc,
+            "epochs": epochs,
+            "lr": lr,
+            "n_params": sum(p.data.size for p in model.parameters()),
+            "model": model,
         },
     )
 
